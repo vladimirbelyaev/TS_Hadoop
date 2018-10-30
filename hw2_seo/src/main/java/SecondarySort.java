@@ -16,9 +16,7 @@ import java.io.IOException;
 
 
 public class SecondarySort extends Configured implements Tool {
-    public static long minclicks;
     public static void main(String[] args) throws Exception {
-        minclicks = (args.length == 3) ? Long.parseLong(args[2]) : 0;
         int rc = ToolRunner.run(new SecondarySort(), args);
         System.exit(rc);
     }
@@ -63,6 +61,12 @@ public class SecondarySort extends Configured implements Tool {
     }
 
     public static class ClickRecordMapper extends Mapper<Text, Text, TextTextLong, LongWritable> {
+        private long minclicks;
+        @Override
+        protected void setup(Context context){
+            minclicks = context.getConfiguration().getLong("seo.minclicks", 0);
+            System.out.println("Parameter seo.minclicks = " + minclicks);
+        }
         @Override
         protected void map(Text key, Text value, Context context) throws IOException, InterruptedException {
             TextTextLong TTLkey = new TextTextLong(key.toString());
@@ -91,10 +95,9 @@ public class SecondarySort extends Configured implements Tool {
         job.setInputFormatClass(KeyValueTextInputFormat.class);
         FileOutputFormat.setOutputPath(job, new Path(out_dir));
 
-        job.setNumReduceTasks(7);
+        job.setNumReduceTasks(1);
         job.setMapperClass(ClickRecordMapper.class);
         job.setReducerClass(ClickRecordReducer.class);
-
         job.setPartitionerClass(ClickRecordPartitioner.class);
         job.setSortComparatorClass(KeyComparator.class);
         job.setGroupingComparatorClass(ClickRecordGrouper.class);

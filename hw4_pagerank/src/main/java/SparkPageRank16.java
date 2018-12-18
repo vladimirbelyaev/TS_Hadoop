@@ -13,7 +13,7 @@ import java.util.HashSet;
 public class SparkPageRank16 {
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
-            System.err.println("Usage: SparkPageRank <file> <number_of_iterations>");
+            System.err.println("Invalid number of parameters");
             System.exit(1);
         }
         Double N = 4847571.0;

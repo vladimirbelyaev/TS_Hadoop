@@ -1,30 +1,33 @@
-import java.util.*;
-import org.apache.spark.api.java.function.*;
-import org.apache.spark.sql.SparkSession;
-import org.apache.spark.util.AccumulatorV2;
-import scala.Tuple2;
-
+import org.apache.spark.*;
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.Function2;
+import org.apache.spark.api.java.function.PairFlatMapFunction;
+import scala.Tuple2;
 
-public final class SparkPageRank {
+import java.util.ArrayList;
+import java.util.HashSet;
+
+
+public class SparkPageRank16 {
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
+            System.err.println("Usage: SparkPageRank <file> <number_of_iterations>");
             System.exit(1);
         }
         Double N = 4847571.0;
         double alpha = 0.01;
-        SparkSession spark = SparkSession
-                .builder()
-                .appName("SparkPageRank")
-                .config("spark.master", "local[*]")
-                .getOrCreate();
-        AccumulatorV2<Double, Double> lostPR = spark.sparkContext().doubleAccumulator("count");
-        JavaRDD<String> lines = spark.read().textFile(args[0]).javaRDD();
+        final SparkConf conf = new SparkConf()
+                //.setMaster("local[*]")
+                .setAppName("SparkPR");
+        final JavaSparkContext sc = new JavaSparkContext(conf);
+        JavaRDD<String> lines = sc.textFile(args[0]);
+        Accumulator<Double> lostPR = sc.accumulator(0.0, new OwnDoubleAccumulator());
         JavaPairRDD<Long, Iterable<Long>> graph = lines.filter(s -> !s.substring(0,1).equals("#"))
                 .flatMapToPair(new PairFlatMapFunction<String, Long, Iterable<Long>>() {
                     @Override
-                    public Iterator<Tuple2<Long, Iterable<Long>>> call(String s) throws Exception {
+                    public Iterable<Tuple2<Long, Iterable<Long>>> call(String s) throws Exception {
                         String[] tmp = s.split("\t");
                         ArrayList<Long> realVal = new ArrayList<>();
                         ArrayList<Long> fakeVal = new ArrayList<>();
@@ -34,7 +37,7 @@ public final class SparkPageRank {
                         ArrayList<Tuple2<Long, Iterable<Long>>> res = new ArrayList<>();
                         res.add(new Tuple2<>(Long.parseLong(tmp[0]), realVal));
                         res.add(new Tuple2<>(Long.parseLong(tmp[1]), fakeVal));
-                        return res.iterator();
+                        return res;
                     }
                 }).reduceByKey(new Function2<Iterable<Long>, Iterable<Long>, Iterable<Long>>() {
                     @Override
@@ -50,13 +53,14 @@ public final class SparkPageRank {
                     }
                 }).cache();
         JavaPairRDD<Long, Double> PR = graph.mapValues(a -> 1.0/N);
+
         for (int i = 0; i < 7; i++) {
             Double lostPRd = lostPR.value();
-            lostPR.reset();
+            lostPR.zero();
             JavaPairRDD<Long, Tuple2<Iterable<Iterable<Long>>, Iterable<Double>>> grp = graph.cogroup(PR);
             JavaPairRDD<Long, Double> mapped = grp.flatMapToPair(new PairFlatMapFunction<Tuple2<Long, Tuple2<Iterable<Iterable<Long>>, Iterable<Double>>>, Long, Double>() {
                 @Override
-                public Iterator<Tuple2<Long, Double>> call(Tuple2<Long, Tuple2<Iterable<Iterable<Long>>, Iterable<Double>>> longTuple2Tuple2) throws Exception {
+                public Iterable<Tuple2<Long, Double>> call(Tuple2<Long, Tuple2<Iterable<Iterable<Long>>, Iterable<Double>>> longTuple2Tuple2) throws Exception {
                     Long counter = 0L;
                     for (Long uid : longTuple2Tuple2._2()._1().iterator().next()) {
                         if (uid != -1) {
@@ -72,7 +76,7 @@ public final class SparkPageRank {
                     ArrayList<Tuple2<Long, Double>> res = new ArrayList<>();
                     if (counter == 0) {
                         lostPR.add(val);
-                        return res.iterator();
+                        return res;
                     }
                     val /= counter;
                     for (Long uid : longTuple2Tuple2._2()._1().iterator().next()) {
@@ -80,13 +84,13 @@ public final class SparkPageRank {
                             res.add(new Tuple2<>(uid, val));
                         }
                     }
-                    return res.iterator();
+                    return res;
                 }
             });
             PR = mapped.reduceByKey((a, b) -> (a + b)).mapValues(w -> (1 - alpha) * w + alpha / N);
         }
         JavaPairRDD<Double, Long> PRtoSort = PR.mapToPair(a->a.swap());
         PRtoSort.sortByKey(false).saveAsTextFile(args[1] + "spark/sortedPR");
-        spark.stop();
+        sc.stop();
     }
 }

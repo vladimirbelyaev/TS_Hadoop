@@ -22,7 +22,8 @@ public class SparkPageRank16 {
                 //.setMaster("local[*]")
                 .setAppName("SparkPR");
         final JavaSparkContext sc = new JavaSparkContext(conf);
-        JavaRDD<String> lines = sc.textFile(args[0]);
+        final int nExecutors = sc.getConf().getInt("spark.executor.instances", 8);
+        JavaRDD<String> lines = sc.textFile(args[0]).repartition(nExecutors);
         Accumulator<Double> lostPR = sc.accumulator(0.0, new OwnDoubleAccumulator());
         JavaPairRDD<Long, Iterable<Long>> graph = lines.filter(s -> !s.substring(0,1).equals("#"))
                 .flatMapToPair(new PairFlatMapFunction<String, Long, Iterable<Long>>() {
